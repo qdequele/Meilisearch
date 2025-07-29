@@ -34,6 +34,7 @@ use error::PayloadError;
 use extractors::payload::PayloadConfig;
 use index_scheduler::versioning::Versioning;
 use index_scheduler::{IndexScheduler, IndexSchedulerOptions};
+use tokio::sync::broadcast;
 use meilisearch_auth::{open_auth_store_env, AuthController};
 use meilisearch_types::milli::constants::VERSION_MAJOR;
 use meilisearch_types::milli::documents::{DocumentsBatchBuilder, DocumentsBatchReader};
@@ -213,6 +214,7 @@ enum OnFailure {
 }
 
 pub fn setup_meilisearch(opt: &Opt) -> anyhow::Result<(Arc<IndexScheduler>, Arc<AuthController>)> {
+    let (task_sender, _) = tokio::sync::broadcast::channel(100);
     let index_scheduler_opt = IndexSchedulerOptions {
         version_file_path: opt.db_path.join(VERSION_FILE_NAME),
         auth_path: opt.db_path.join("auth"),
@@ -238,6 +240,7 @@ pub fn setup_meilisearch(opt: &Opt) -> anyhow::Result<(Arc<IndexScheduler>, Arc<
         auto_upgrade: opt.experimental_dumpless_upgrade,
         embedding_cache_cap: opt.experimental_embedding_cache_entries,
         experimental_no_snapshot_compaction: opt.experimental_no_snapshot_compaction,
+        task_sender: Some(task_sender.clone()),
     };
     let binary_version = (VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH);
 
