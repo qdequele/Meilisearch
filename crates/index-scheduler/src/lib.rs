@@ -73,6 +73,7 @@ use roaring::RoaringBitmap;
 use scheduler::Scheduler;
 use time::OffsetDateTime;
 use versioning::Versioning;
+use tokio::sync::broadcast;
 
 use crate::index_mapper::IndexMapper;
 use crate::utils::clamp_to_page_size;
@@ -139,6 +140,9 @@ pub struct IndexSchedulerOptions {
     pub embedding_cache_cap: usize,
     /// Snapshot compaction status.
     pub experimental_no_snapshot_compaction: bool,
+    /// Sender used to broadcast task updates over websockets.
+    #[cfg_attr(test, serde(skip))]
+    pub task_sender: Option<broadcast::Sender<Vec<u8>>>,
 }
 
 /// Structure which holds meilisearch's indexes and schedules the tasks
@@ -172,6 +176,9 @@ pub struct IndexScheduler {
     pub(crate) webhook_url: Option<String>,
     /// The Authorization header to send to the webhook URL.
     pub(crate) webhook_authorization_header: Option<String>,
+
+    /// Broadcast sender used to notify websocket clients about task updates.
+    pub task_sender: Option<broadcast::Sender<Vec<u8>>>,
 
     /// A map to retrieve the runtime representation of an embedder depending on its configuration.
     ///
@@ -212,6 +219,7 @@ impl IndexScheduler {
             cleanup_enabled: self.cleanup_enabled,
             webhook_url: self.webhook_url.clone(),
             webhook_authorization_header: self.webhook_authorization_header.clone(),
+            task_sender: self.task_sender.clone(),
             embedders: self.embedders.clone(),
             #[cfg(test)]
             test_breakpoint_sdr: self.test_breakpoint_sdr.clone(),
@@ -298,6 +306,7 @@ impl IndexScheduler {
             cleanup_enabled: options.cleanup_enabled,
             webhook_url: options.webhook_url,
             webhook_authorization_header: options.webhook_authorization_header,
+            task_sender: options.task_sender,
             embedders: Default::default(),
 
             #[cfg(test)]
@@ -816,6 +825,17 @@ impl IndexScheduler {
 
             if let Err(e) = request.send(reader) {
                 tracing::error!("While sending data to the webhook: {e}");
+            }
+        }
+
+        if let Some(sender) = &self.task_sender {
+            let rtxn = self.env.read_txn()?;
+            for task_id in updated.iter() {
+                if let Some(task) = self.queue.tasks.get_task(&rtxn, task_id).map_err(|err| io::Error::new(io::ErrorKind::Other, err))? {
+                    if let Ok(json) = serde_json::to_vec(&TaskView::from_task(&task)) {
+                        let _ = sender.send(json);
+                    }
+                }
             }
         }
 

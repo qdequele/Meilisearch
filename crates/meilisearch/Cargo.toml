@@ -89,6 +89,7 @@ time = { version = "0.3.41", features = [
     "macros",
 ] }
 tokio = { version = "1.45.1", features = ["full"] }
+actix-web-actors = "4.3.0"
 toml = "0.8.23"
 uuid = { version = "1.17.0", features = ["serde", "v4"] }
 serde_urlencoded = "0.7.1"
