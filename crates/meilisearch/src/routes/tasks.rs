@@ -18,6 +18,7 @@ use serde::Serialize;
 use time::format_description::well_known::Rfc3339;
 use time::macros::format_description;
 use time::{Date, Duration, OffsetDateTime, Time};
+use crate::routes::tasks_socket;
 use tokio::io::AsyncReadExt;
 use tokio::task;
 use utoipa::{IntoParams, OpenApi, ToSchema};
@@ -51,7 +52,8 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
     .service(
         web::resource("/{task_id}/documents")
             .route(web::get().to(SeqHandler(get_task_documents_file))),
-    );
+    )
+    .service(web::resource("/stream").route(web::get().to(tasks_socket::task_socket)));
 }
 
 #[derive(Debug, Deserr, IntoParams)]

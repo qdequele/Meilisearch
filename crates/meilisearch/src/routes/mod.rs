@@ -65,6 +65,7 @@ mod multi_search;
 mod multi_search_analytics;
 pub mod network;
 mod open_api_utils;
+mod tasks_socket;
 mod snapshot;
 mod swap_indexes;
 pub mod tasks;
