@@ -813,6 +813,9 @@ pub fn execute_search(
         universe &=
             resolve_universe(ctx, &universe, &graph, terms_matching_strategy, query_graph_logger)?;
 
+        let span = tracing::trace_span!(target: "search::main", "search_execution");
+        let _entered = span.enter();
+        
         bucket_sort(
             ctx,
             ranking_rules,
@@ -829,6 +832,10 @@ pub fn execute_search(
     } else {
         let ranking_rules =
             get_ranking_rules_for_placeholder_search(ctx, sort_criteria, geo_param)?;
+        
+        let span = tracing::trace_span!(target: "search::main", "placeholder_search_execution");
+        let _entered = span.enter();
+        
         bucket_sort(
             ctx,
             ranking_rules,

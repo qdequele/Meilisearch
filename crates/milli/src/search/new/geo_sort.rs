@@ -154,6 +154,9 @@ impl<Q: RankingRuleQueryTrait> GeoSort<Q> {
 
         let cache_size = self.strategy.cache_size();
         if let Some(rtree) = rtree {
+            let compute_span = tracing::trace_span!(target: "search::geo::sort::compute", "geo_sort_compute");
+            let _compute_enter = compute_span.enter();
+            
             if self.ascending {
                 let point = lat_lng_to_xyz(&self.point);
                 for point in rtree.nearest_neighbor_iter(&point) {
@@ -179,6 +182,9 @@ impl<Q: RankingRuleQueryTrait> GeoSort<Q> {
             }
         } else {
             // the iterative version
+            let bucket_span = tracing::trace_span!(target: "search::geo::sort::bucket", "geo_sort_bucket");
+            let _bucket_enter = bucket_span.enter();
+            
             let [lat, lng] = self.field_ids.unwrap();
 
             let mut documents = geo_candidates

@@ -696,6 +696,10 @@ impl EmbeddingCache {
         if text.len() > Self::MAX_TEXT_LEN {
             return None;
         }
+        
+        let span = tracing::trace_span!(target: "search::cache::lookup", "cache_lookup");
+        let _enter = span.enter();
+        
         let mut cache = data.lock().unwrap();
 
         cache.get(text).cloned()

@@ -14,6 +14,9 @@ impl<G: RankingRuleGraphTrait> RankingRuleGraph<G> {
         query_graph: QueryGraph,
         cost_of_ignoring_node: MappedInterner<QueryNode, Option<(u32, SmallBitmap<QueryNode>)>>,
     ) -> Result<Self> {
+        let span = tracing::trace_span!(target: "search::graph_based", "ranking_graph_build");
+        let _entered = span.enter();
+        
         let QueryGraph { nodes: graph_nodes, .. } = &query_graph;
 
         let mut conditions_interner = DedupInterner::default();

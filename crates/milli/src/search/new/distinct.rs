@@ -27,6 +27,9 @@ pub fn apply_distinct_rule(
     field_id: u16,
     candidates: &RoaringBitmap,
 ) -> Result<DistinctOutput> {
+    let span = tracing::trace_span!(target: "search::results::distinct", "distinct_processing");
+    let _enter = span.enter();
+    
     let mut excluded = RoaringBitmap::new();
     let mut remaining = RoaringBitmap::new();
     for docid in candidates {
