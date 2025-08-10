@@ -16,7 +16,7 @@ mod tests {
         let hierarchy = SearchTimingHierarchy::from_flat_timing(&timing);
 
         // Check that hierarchical entries exist
-        assert!(hierarchy.timing_entries.contains_key("total_search"));
+        assert!(hierarchy.timing_entries.contains_key("processing_time_ms"));
         assert!(hierarchy.timing_entries.contains_key("query_processing"));
         assert!(hierarchy.timing_entries.contains_key("query_processing > parsing"));
         assert!(hierarchy.timing_entries.contains_key("tokenization"));
@@ -24,8 +24,8 @@ mod tests {
         assert!(hierarchy.timing_entries.contains_key("result_formatting"));
 
         // Check values (they're now JSON values, so we need to extract them)
-        let total_search = hierarchy.timing_entries.get("total_search").unwrap();
-        assert_eq!(total_search.as_str().unwrap(), "100.00ms");
+        let processing_time_ms = hierarchy.timing_entries.get("processing_time_ms").unwrap();
+        assert_eq!(processing_time_ms.as_str().unwrap(), "100.00ms");
 
         let query_processing = hierarchy.timing_entries.get("query_processing").unwrap();
         assert_eq!(query_processing.as_str().unwrap(), "30.00ms");
@@ -39,12 +39,12 @@ mod tests {
         let timing = SearchTiming::default();
         let hierarchy = SearchTimingHierarchy::from_flat_timing(&timing);
 
-        // Only total_search should be present with zero duration
+        // Only processing_time_ms should be present with zero duration
         assert_eq!(hierarchy.timing_entries.len(), 1);
-        assert!(hierarchy.timing_entries.contains_key("total_search"));
+        assert!(hierarchy.timing_entries.contains_key("processing_time_ms"));
         
-        let total_search = hierarchy.timing_entries.get("total_search").unwrap();
-        assert_eq!(total_search.as_str().unwrap(), "0.00ns");
+        let processing_time_ms = hierarchy.timing_entries.get("processing_time_ms").unwrap();
+        assert_eq!(processing_time_ms.as_str().unwrap(), "0.00ns");
     }
 
     #[test]
@@ -68,7 +68,7 @@ mod tests {
         }
 
         // Verify the hierarchical structure
-        assert!(hierarchy.timing_entries.contains_key("total_search"));
+        assert!(hierarchy.timing_entries.contains_key("processing_time_ms"));
         assert!(hierarchy.timing_entries.contains_key("query_processing"));
         assert!(hierarchy.timing_entries.contains_key("query_processing > parsing"));
         assert!(hierarchy.timing_entries.contains_key("query_processing > tree_build"));
