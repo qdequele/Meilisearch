@@ -260,7 +260,7 @@ impl<'a> SearchForFacetValues<'a> {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, PartialEq, utoipa::ToSchema)]
 pub struct FacetValueHit {
     /// The original facet value
     pub value: String,

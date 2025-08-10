@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use deserr::Deserr;
+use tracing_subscriber::layer::SubscriberExt;
 use either::Either;
 use index_scheduler::RoFeatures;
 use indexmap::IndexMap;
@@ -836,7 +837,6 @@ pub struct SearchHit {
 }
 
 #[derive(Serialize, Clone, PartialEq, ToSchema)]
-#[serde(rename_all = "camelCase")]
 #[schema(rename_all = "camelCase")]
 pub struct SearchResult {
     pub hits: Vec<SearchHit>,
@@ -852,6 +852,9 @@ pub struct SearchResult {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub semantic_hit_count: Option<u32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detailed_timing: Option<SearchTiming>,
 
     // These fields are only used for analytics purposes
     #[serde(skip)]
@@ -872,6 +875,7 @@ impl fmt::Debug for SearchResult {
             semantic_hit_count,
             degraded,
             used_negative_operator,
+            detailed_timing,
         } = self;
 
         let mut debug = f.debug_struct("SearchResult");
@@ -894,6 +898,9 @@ impl fmt::Debug for SearchResult {
         }
         if let Some(semantic_hit_count) = semantic_hit_count {
             debug.field("semantic_hit_count", &semantic_hit_count);
+        }
+        if let Some(detailed_timing) = detailed_timing {
+            debug.field("detailed_timing", &detailed_timing);
         }
 
         debug.finish()
@@ -936,8 +943,32 @@ pub struct FacetStats {
     pub max: f64,
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Serialize, Debug, Clone, PartialEq, ToSchema)]
+#[schema(rename_all = "camelCase")]
+pub struct SearchTiming {
+    /// Total time for the entire search operation
+    pub total_time_ms: u64,
+    /// Time for keyword search operations
+    pub keyword_search_ms: Option<u64>,
+    /// Time for vector search operations
+    pub vector_search_ms: Option<u64>,
+    /// Time for hybrid search operations
+    pub hybrid_search_ms: Option<u64>,
+    /// Time for embedding operations
+    pub embedding_ms: Option<u64>,
+    /// Time for tokenization operations
+    pub tokenization_ms: Option<u64>,
+    /// Time for facet computation
+    pub facets_ms: Option<u64>,
+    /// Time for result formatting
+    pub formatting_ms: Option<u64>,
+    /// Additional timing information for specific operations
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub additional_timing: Option<BTreeMap<String, u64>>,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq, ToSchema)]
+#[schema(rename_all = "camelCase")]
 pub struct FacetSearchResult {
     pub facet_hits: Vec<FacetValueHit>,
     pub facet_query: Option<String>,
@@ -1123,6 +1154,11 @@ pub fn perform_search(
     let (search, is_finite_pagination, max_total_hits, offset) =
         prepare_search(index, &rtxn, &query, &search_kind, time_budget, features)?;
 
+    // Collect timing information for the core search operation
+    let ((search_result, semantic_hit_count), search_timing) = collect_search_timing(|| {
+        Ok(search_from_kind(index_uid.clone(), search_kind.clone(), search)?)
+    })?;
+
     let (
         milli::SearchResult {
             documents_ids,
@@ -1133,7 +1169,7 @@ pub fn perform_search(
             used_negative_operator,
         },
         semantic_hit_count,
-    ) = search_from_kind(index_uid, search_kind, search)?;
+    ) = (search_result, semantic_hit_count);
 
     let SearchQuery {
         q,
@@ -1183,13 +1219,16 @@ pub fn perform_search(
         locales: locales.map(|l| l.iter().copied().map(Into::into).collect()),
     };
 
-    let documents = make_hits(
-        index,
-        &rtxn,
-        format,
-        matching_words,
-        documents_ids.iter().copied().zip(document_scores.iter()),
-    )?;
+    // Collect timing information for result formatting
+    let (documents, formatting_timing) = collect_search_timing(|| {
+        Ok(make_hits(
+            index,
+            &rtxn,
+            format,
+            matching_words,
+            documents_ids.iter().copied().zip(document_scores.iter()),
+        )?)
+    })?;
 
     let number_of_hits = min(candidates.len() as usize, max_total_hits);
     let hits_info = if is_finite_pagination {
@@ -1209,13 +1248,46 @@ pub fn perform_search(
         HitsInfo::OffsetLimit { limit, offset, estimated_total_hits: number_of_hits }
     };
 
-    let (facet_distribution, facet_stats) = facets
+    // Collect timing information for facet computation
+    let (facet_result, facet_timing) = facets
         .map(move |facets| {
-            compute_facet_distribution_stats(&facets, index, &rtxn, candidates, Route::Search)
+            collect_search_timing(|| {
+                compute_facet_distribution_stats(&facets, index, &rtxn, candidates, Route::Search)
+            })
         })
         .transpose()?
+        .map(|(facets, timing)| (facets, Some(timing)))
+        .unzip();
+
+    let (facet_distribution, facet_stats) = facet_result
         .map(|ComputedFacets { distribution, stats }| (distribution, stats))
         .unzip();
+
+    // Combine all timing information
+    let detailed_timing = SearchTiming {
+        total_time_ms: before_search.elapsed().as_millis() as u64,
+        keyword_search_ms: search_timing.keyword_search_ms,
+        vector_search_ms: search_timing.vector_search_ms,
+        hybrid_search_ms: search_timing.hybrid_search_ms,
+        embedding_ms: search_timing.embedding_ms,
+        tokenization_ms: search_timing.tokenization_ms,
+        facets_ms: facet_timing.clone().flatten().and_then(|t| t.facets_ms),
+        formatting_ms: formatting_timing.formatting_ms,
+        additional_timing: {
+            let mut additional = search_timing.additional_timing.unwrap_or_default();
+            if let Some(formatting_additional) = formatting_timing.additional_timing {
+                additional.extend(formatting_additional);
+            }
+            if let Some(facet_additional) = facet_timing.flatten().and_then(|t| t.additional_timing) {
+                additional.extend(facet_additional);
+            }
+            if !additional.is_empty() {
+                Some(additional)
+            } else {
+                None
+            }
+        },
+    };
 
     let result = SearchResult {
         hits: documents,
@@ -1227,6 +1299,7 @@ pub fn perform_search(
         degraded,
         used_negative_operator,
         semantic_hit_count,
+        detailed_timing: Some(detailed_timing),
     };
     Ok(result)
 }
@@ -2121,4 +2194,77 @@ fn parse_filter_array(arr: &[Value]) -> Result<Option<Filter>, MeilisearchHttpEr
     }
 
     Filter::from_array(ands).map_err(|e| MeilisearchHttpError::from_milli(e, None))
+}
+
+/// Collect timing information from tracing spans
+/// This function creates a temporary tracing layer to collect timing information
+/// from the various search operations
+fn collect_search_timing<F, R>(operation: F) -> Result<(R, SearchTiming), ResponseError>
+where
+    F: FnOnce() -> Result<R, ResponseError>,
+{
+    use tracing_trace::Trace;
+
+    // Create a temporary tracing layer to collect timing information
+    let (trace, layer) = Trace::new(false);
+    let guard = tracing::subscriber::set_default(tracing_subscriber::Registry::default().with(layer));
+
+    // Execute the search operation
+    let result = operation()?;
+
+    // Drop the guard to restore the original subscriber
+    drop(guard);
+
+    // Collect timing information from the trace
+    let mut receiver = trace.into_receiver();
+    let mut entries = Vec::new();
+    
+    // Collect all entries from the trace
+    while let Ok(entry) = receiver.try_recv() {
+        entries.push(entry);
+    }
+
+    // Process the entries to extract timing information
+    let mut timing = SearchTiming {
+        total_time_ms: 0,
+        keyword_search_ms: None,
+        vector_search_ms: None,
+        hybrid_search_ms: None,
+        embedding_ms: None,
+        tokenization_ms: None,
+        facets_ms: None,
+        formatting_ms: None,
+        additional_timing: Some(BTreeMap::new()),
+    };
+
+    // Process the trace entries to extract timing information
+    // This is a simplified version - in practice, you'd want to use the tracing_trace processor
+    if let Ok(stats) = tracing_trace::processor::span_stats::to_call_stats(
+        tracing_trace::TraceReader::new(std::io::Cursor::new(
+            serde_json::to_string(&entries).unwrap_or_default()
+        ))
+    ) {
+        for (span_name, call_stats) in stats {
+            let time_ms = (call_stats.time as f64 / 1_000_000.0) as u64; // Convert nanoseconds to milliseconds
+            
+            match span_name.as_str() {
+                "search::tokens::tokenizer_builder" | "search::tokens::tokenize" => {
+                    timing.tokenization_ms = Some(timing.tokenization_ms.unwrap_or(0) + time_ms);
+                }
+                "search::vector::embed_one" => {
+                    timing.embedding_ms = Some(timing.embedding_ms.unwrap_or(0) + time_ms);
+                }
+                "search::hybrid::embed_one" => {
+                    timing.embedding_ms = Some(timing.embedding_ms.unwrap_or(0) + time_ms);
+                }
+                _ => {
+                    if let Some(ref mut additional) = timing.additional_timing {
+                        additional.insert(span_name, time_ms);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok((result, timing))
 }
