@@ -855,6 +855,9 @@ pub struct SearchResult {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detailed_timing: Option<SearchTiming>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hierarchical_timing: Option<SearchTimingHierarchy>,
 
     // These fields are only used for analytics purposes
     #[serde(skip)]
@@ -876,6 +879,7 @@ impl fmt::Debug for SearchResult {
             degraded,
             used_negative_operator,
             detailed_timing,
+            hierarchical_timing: _,
         } = self;
 
         let mut debug = f.debug_struct("SearchResult");
@@ -943,7 +947,7 @@ pub struct FacetStats {
     pub max: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct SearchTiming {
     // Core timings
     pub total_search_time: Duration,
@@ -1036,6 +1040,169 @@ pub struct SearchTiming {
     
     // Additional custom timings
     pub additional_timing: BTreeMap<String, Duration>,
+}
+
+/// Hierarchical timing structure for search operations
+/// Similar to indexing timing with parent-child relationships
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
+pub struct SearchTimingHierarchy {
+    /// The hierarchical timing entries with ">" separators
+    pub timing_entries: BTreeMap<String, Duration>,
+}
+
+impl SearchTimingHierarchy {
+    /// Convert flat SearchTiming to hierarchical format
+    pub fn from_flat_timing(timing: &SearchTiming) -> Self {
+        let mut entries = BTreeMap::new();
+        
+        // Core search structure
+        entries.insert("total_search".to_string(), timing.total_search_time);
+        
+        // Query processing hierarchy
+        if timing.query_processing_time > Duration::ZERO {
+            entries.insert("query_processing".to_string(), timing.query_processing_time);
+            
+            if timing.query_parsing_time > Duration::ZERO {
+                entries.insert("query_processing > parsing".to_string(), timing.query_parsing_time);
+            }
+            if timing.query_tree_build_time > Duration::ZERO {
+                entries.insert("query_processing > tree_build".to_string(), timing.query_tree_build_time);
+            }
+            if timing.query_tree_simplify_time > Duration::ZERO {
+                entries.insert("query_processing > tree_simplify".to_string(), timing.query_tree_simplify_time);
+            }
+            if timing.ranking_graph_build_time > Duration::ZERO {
+                entries.insert("query_processing > ranking_graph_build".to_string(), timing.ranking_graph_build_time);
+            }
+        }
+        
+        // Tokenization hierarchy
+        if timing.tokenization_time > Duration::ZERO {
+            entries.insert("tokenization".to_string(), timing.tokenization_time);
+            
+            if timing.tokenizer_build_time > Duration::ZERO {
+                entries.insert("tokenization > tokenizer_build".to_string(), timing.tokenizer_build_time);
+            }
+        }
+        
+        // Search execution hierarchy
+        if timing.search_execution_time > Duration::ZERO {
+            entries.insert("search_execution".to_string(), timing.search_execution_time);
+            
+            // Search types
+            if timing.keyword_search_time > Duration::ZERO {
+                entries.insert("search_execution > keyword_search".to_string(), timing.keyword_search_time);
+            }
+            if timing.vector_search_time > Duration::ZERO {
+                entries.insert("search_execution > vector_search".to_string(), timing.vector_search_time);
+            }
+            if timing.hybrid_search_time > Duration::ZERO {
+                entries.insert("search_execution > hybrid_search".to_string(), timing.hybrid_search_time);
+            }
+            if timing.embedding_time > Duration::ZERO {
+                entries.insert("search_execution > embedding".to_string(), timing.embedding_time);
+            }
+            
+            // Ranking rules
+            if timing.words_ranking_time > Duration::ZERO {
+                entries.insert("search_execution > ranking > words".to_string(), timing.words_ranking_time);
+            }
+            if timing.typo_ranking_time > Duration::ZERO {
+                entries.insert("search_execution > ranking > typo".to_string(), timing.typo_ranking_time);
+            }
+            if timing.proximity_ranking_time > Duration::ZERO {
+                entries.insert("search_execution > ranking > proximity".to_string(), timing.proximity_ranking_time);
+            }
+            if timing.attribute_ranking_time > Duration::ZERO {
+                entries.insert("search_execution > ranking > attribute".to_string(), timing.attribute_ranking_time);
+            }
+            if timing.exactness_ranking_time > Duration::ZERO {
+                entries.insert("search_execution > ranking > exactness".to_string(), timing.exactness_ranking_time);
+            }
+            if timing.sort_ranking_time > Duration::ZERO {
+                entries.insert("search_execution > ranking > sort".to_string(), timing.sort_ranking_time);
+            }
+            
+            // Geographic operations
+            if timing.geo_filter_time > Duration::ZERO {
+                entries.insert("search_execution > geo > filter".to_string(), timing.geo_filter_time);
+            }
+            if timing.geo_sort_time > Duration::ZERO {
+                entries.insert("search_execution > geo > sort".to_string(), timing.geo_sort_time);
+            }
+            if timing.geo_sort_compute_time > Duration::ZERO {
+                entries.insert("search_execution > geo > sort > compute".to_string(), timing.geo_sort_compute_time);
+            }
+            if timing.geo_bucket_sort_time > Duration::ZERO {
+                entries.insert("search_execution > geo > sort > bucket".to_string(), timing.geo_bucket_sort_time);
+            }
+            
+            // Cache and database
+            if timing.cache_lookup_time > Duration::ZERO {
+                entries.insert("search_execution > cache > lookup".to_string(), timing.cache_lookup_time);
+            }
+            if timing.database_read_time > Duration::ZERO {
+                entries.insert("search_execution > database > read".to_string(), timing.database_read_time);
+            }
+            if timing.filter_application_time > Duration::ZERO {
+                entries.insert("search_execution > database > filter".to_string(), timing.filter_application_time);
+            }
+        }
+        
+        // Result formatting hierarchy
+        if timing.result_formatting_time > Duration::ZERO {
+            entries.insert("result_formatting".to_string(), timing.result_formatting_time);
+            
+            if timing.result_sorting_time > Duration::ZERO {
+                entries.insert("result_formatting > sorting".to_string(), timing.result_sorting_time);
+            }
+            if timing.distinct_processing_time > Duration::ZERO {
+                entries.insert("result_formatting > distinct".to_string(), timing.distinct_processing_time);
+            }
+            if timing.pagination_time > Duration::ZERO {
+                entries.insert("result_formatting > pagination".to_string(), timing.pagination_time);
+            }
+        }
+        
+        // Facet operations hierarchy
+        if timing.facet_distribution_time > Duration::ZERO || timing.facet_stats_time > Duration::ZERO || timing.facet_search_time > Duration::ZERO {
+            let total_facet_time = timing.facet_distribution_time + timing.facet_stats_time + timing.facet_search_time;
+            entries.insert("facets".to_string(), total_facet_time);
+            
+            if timing.facet_distribution_time > Duration::ZERO {
+                entries.insert("facets > distribution".to_string(), timing.facet_distribution_time);
+            }
+            if timing.facet_stats_time > Duration::ZERO {
+                entries.insert("facets > stats".to_string(), timing.facet_stats_time);
+            }
+            if timing.facet_search_time > Duration::ZERO {
+                entries.insert("facets > search".to_string(), timing.facet_search_time);
+            }
+            
+            // Per-attribute facet timing
+            for (attr, duration) in &timing.facet_attribute_timing {
+                if *duration > Duration::ZERO {
+                    entries.insert(format!("facets > attribute > {}", attr), *duration);
+                }
+            }
+        }
+        
+        // Per-attribute filter timing
+        for (attr, duration) in &timing.filter_attribute_timing {
+            if *duration > Duration::ZERO {
+                entries.insert(format!("search_execution > database > filter > {}", attr), *duration);
+            }
+        }
+        
+        // Additional timing entries
+        for (key, duration) in &timing.additional_timing {
+            if *duration > Duration::ZERO {
+                entries.insert(format!("additional > {}", key), *duration);
+            }
+        }
+        
+        Self { timing_entries: entries }
+    }
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq, ToSchema)]
@@ -1273,6 +1440,8 @@ pub fn perform_search(
         matching_strategy: _,
         attributes_to_search_on: _,
         ranking_score_threshold: _,
+        filter: _,
+        distinct: _,
     } = query;
 
     // Collect timing information for result formatting
@@ -1293,10 +1462,10 @@ pub fn perform_search(
                 sort,
                 show_ranking_score,
                 show_ranking_score_details,
-                locales,
+                locales: locales.map(|l| l.into_iter().map(Into::into).collect()),
             },
             matching_words,
-            documents_ids.iter().zip(document_scores.iter()),
+            documents_ids.iter().copied().zip(document_scores.iter()),
         )?)
     })?;
 
@@ -1381,7 +1550,8 @@ pub fn perform_search(
         facet_distribution: facet_timing.as_ref().map(|f| f.distribution.clone()),
         facet_stats: facet_timing.map(|f| f.stats),
         semantic_hit_count,
-        detailed_timing: Some(detailed_timing),
+        detailed_timing: Some(detailed_timing.clone()),
+        hierarchical_timing: Some(SearchTimingHierarchy::from_flat_timing(&detailed_timing)),
         degraded,
         used_negative_operator,
     })
@@ -2290,8 +2460,8 @@ where
     F: FnOnce() -> Result<R, ResponseError>,
 {
     // Create a temporary tracing layer to collect events
-    let trace = tracing_trace::Trace::new();
-    let registry = tracing_subscriber::Registry::default().with(trace);
+    let (trace, layer) = tracing_trace::Trace::new(false);
+    let registry = tracing_subscriber::Registry::default().with(layer);
     let _guard = tracing::subscriber::set_default(registry);
 
     // Execute the operation
@@ -2299,9 +2469,9 @@ where
 
     // Collect the trace
     let mut receiver = trace.into_receiver();
-    let mut entries = Vec::new();
-    while let Some(entry) = receiver.recv() {
-        entries.push(entry);
+    let mut buffer = Vec::new();
+    while let Some(entry) = receiver.blocking_recv() {
+        serde_json::to_writer(&mut buffer, &entry).unwrap();
     }
 
     // Process the entries to extract timing information
@@ -2345,9 +2515,9 @@ where
     };
 
     // Process the trace entries to extract timing information
-    if let Ok(stats) = tracing_trace::processor::span_stats::to_call_stats(&entries) {
+    if let Ok(stats) = tracing_trace::processor::span_stats::to_call_stats(tracing_trace::TraceReader::new(buffer.as_slice())) {
         for (span_name, stat) in stats {
-            let time_ms = stat.total_duration.as_millis() as u64;
+            let time_ms = stat.time / 1_000_000; // Convert nanoseconds to milliseconds
             
             match span_name.as_str() {
                 // Tokenization
@@ -2369,8 +2539,25 @@ where
                     timing.embedding_time += Duration::from_millis(time_ms);
                 }
                 
+                // Keyword search (placeholder for now)
+                "search::keyword" => {
+                    timing.keyword_search_time += Duration::from_millis(time_ms);
+                }
+                
                 // Query processing
                 "search::query" => {
+                    timing.query_processing_time += Duration::from_millis(time_ms);
+                }
+                "search::query::parse" => {
+                    timing.query_parsing_time += Duration::from_millis(time_ms);
+                    timing.query_processing_time += Duration::from_millis(time_ms);
+                }
+                "search::query::tree_build" => {
+                    timing.query_tree_build_time += Duration::from_millis(time_ms);
+                    timing.query_processing_time += Duration::from_millis(time_ms);
+                }
+                "search::query::simplify" => {
+                    timing.query_tree_simplify_time += Duration::from_millis(time_ms);
                     timing.query_processing_time += Duration::from_millis(time_ms);
                 }
                 "search::universe" => {
@@ -2437,6 +2624,11 @@ where
                 }
                 "search::results::limit" => {
                     timing.pagination_time += Duration::from_millis(time_ms);
+                }
+                
+                // Placeholder search execution
+                "search::main::placeholder_search_execution" => {
+                    timing.search_execution_time += Duration::from_millis(time_ms);
                 }
                 
                 // Cache and database

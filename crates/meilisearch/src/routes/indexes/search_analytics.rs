@@ -232,6 +232,7 @@ impl<Method: AggregateMethod> SearchAggregator<Method> {
             degraded,
             used_negative_operator,
             detailed_timing: _,
+            hierarchical_timing: _,
         } = result;
 
         self.total_succeeded = self.total_succeeded.saturating_add(1);
