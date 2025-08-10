@@ -947,53 +947,85 @@ pub struct FacetStats {
 pub struct SearchTiming {
     // Core timings
     pub total_search_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in query processing functions
     pub query_processing_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in search execution functions
     pub search_execution_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in result formatting functions
     pub result_formatting_time: Duration,
     
     // Query processing breakdown
+    // TODO: Not implemented yet - needs timing spans in query parsing
     pub query_parsing_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in query tree building
     pub query_tree_build_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in query tree simplification
     pub query_tree_simplify_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in ranking graph building
     pub ranking_graph_build_time: Duration,
     
     // Tokenization
+    // TODO: Not implemented yet - needs timing spans in tokenization functions
     pub tokenization_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in tokenizer building
     pub tokenizer_build_time: Duration,
     
     // Search types
+    // TODO: Not implemented yet - needs timing spans in keyword search
     pub keyword_search_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in vector search
     pub vector_search_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in hybrid search
     pub hybrid_search_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in embedding operations
     pub embedding_time: Duration,
     
     // Ranking rules (individual)
+    // TODO: Not implemented yet - needs timing spans in words ranking rule
     pub words_ranking_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in typo ranking rule
     pub typo_ranking_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in proximity ranking rule
     pub proximity_ranking_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in attribute ranking rule
     pub attribute_ranking_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in exactness ranking rule
     pub exactness_ranking_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in sort ranking rule
     pub sort_ranking_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in geo sort ranking rule
     pub geo_sort_time: Duration,
     
     // Geographic operations
+    // TODO: Not implemented yet - needs timing spans in geo filtering
     pub geo_filter_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in geo sort computation
     pub geo_sort_compute_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in geo bucket sorting
     pub geo_bucket_sort_time: Duration,
     
     // Facet operations
+    // TODO: Not implemented yet - needs timing spans in facet distribution
     pub facet_distribution_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in facet statistics
     pub facet_stats_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in facet search
     pub facet_search_time: Duration,
     
     // Result processing
+    // TODO: Not implemented yet - needs timing spans in result sorting
     pub result_sorting_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in distinct processing
     pub distinct_processing_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in pagination
     pub pagination_time: Duration,
     
     // Cache and database
+    // TODO: Not implemented yet - needs timing spans in cache lookup
     pub cache_lookup_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in database read operations
     pub database_read_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in filter application
     pub filter_application_time: Duration,
     
     // Additional custom timings
