@@ -947,7 +947,7 @@ pub struct FacetStats {
     pub max: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema, Default)]
 pub struct SearchTiming {
     // Core timings
     pub total_search_time: Duration,
@@ -1046,143 +1046,143 @@ pub struct SearchTiming {
 /// Similar to indexing timing with parent-child relationships
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct SearchTimingHierarchy {
-    /// The hierarchical timing entries with ">" separators
-    pub timing_entries: BTreeMap<String, Duration>,
+    /// The hierarchical timing entries with ">" separators, formatted as strings like Batch progress_trace
+    pub timing_entries: serde_json::Map<String, serde_json::Value>,
 }
 
 impl SearchTimingHierarchy {
     /// Convert flat SearchTiming to hierarchical format
     pub fn from_flat_timing(timing: &SearchTiming) -> Self {
-        let mut entries = BTreeMap::new();
+        let mut entries = serde_json::Map::new();
         
         // Core search structure
-        entries.insert("total_search".to_string(), timing.total_search_time);
+        entries.insert("total_search".to_string(), serde_json::Value::String(format!("{:.2?}", timing.total_search_time)));
         
         // Query processing hierarchy
         if timing.query_processing_time > Duration::ZERO {
-            entries.insert("query_processing".to_string(), timing.query_processing_time);
+            entries.insert("query_processing".to_string(), serde_json::Value::String(format!("{:.2?}", timing.query_processing_time)));
             
             if timing.query_parsing_time > Duration::ZERO {
-                entries.insert("query_processing > parsing".to_string(), timing.query_parsing_time);
+                entries.insert("query_processing > parsing".to_string(), serde_json::Value::String(format!("{:.2?}", timing.query_parsing_time)));
             }
             if timing.query_tree_build_time > Duration::ZERO {
-                entries.insert("query_processing > tree_build".to_string(), timing.query_tree_build_time);
+                entries.insert("query_processing > tree_build".to_string(), serde_json::Value::String(format!("{:.2?}", timing.query_tree_build_time)));
             }
             if timing.query_tree_simplify_time > Duration::ZERO {
-                entries.insert("query_processing > tree_simplify".to_string(), timing.query_tree_simplify_time);
+                entries.insert("query_processing > tree_simplify".to_string(), serde_json::Value::String(format!("{:.2?}", timing.query_tree_simplify_time)));
             }
             if timing.ranking_graph_build_time > Duration::ZERO {
-                entries.insert("query_processing > ranking_graph_build".to_string(), timing.ranking_graph_build_time);
+                entries.insert("query_processing > ranking_graph_build".to_string(), serde_json::Value::String(format!("{:.2?}", timing.ranking_graph_build_time)));
             }
         }
         
         // Tokenization hierarchy
         if timing.tokenization_time > Duration::ZERO {
-            entries.insert("tokenization".to_string(), timing.tokenization_time);
+            entries.insert("tokenization".to_string(), serde_json::Value::String(format!("{:.2?}", timing.tokenization_time)));
             
             if timing.tokenizer_build_time > Duration::ZERO {
-                entries.insert("tokenization > tokenizer_build".to_string(), timing.tokenizer_build_time);
+                entries.insert("tokenization > tokenizer_build".to_string(), serde_json::Value::String(format!("{:.2?}", timing.tokenizer_build_time)));
             }
         }
         
         // Search execution hierarchy
         if timing.search_execution_time > Duration::ZERO {
-            entries.insert("search_execution".to_string(), timing.search_execution_time);
+            entries.insert("search_execution".to_string(), serde_json::Value::String(format!("{:.2?}", timing.search_execution_time)));
             
             // Search types
             if timing.keyword_search_time > Duration::ZERO {
-                entries.insert("search_execution > keyword_search".to_string(), timing.keyword_search_time);
+                entries.insert("search_execution > keyword_search".to_string(), serde_json::Value::String(format!("{:.2?}", timing.keyword_search_time)));
             }
             if timing.vector_search_time > Duration::ZERO {
-                entries.insert("search_execution > vector_search".to_string(), timing.vector_search_time);
+                entries.insert("search_execution > vector_search".to_string(), serde_json::Value::String(format!("{:.2?}", timing.vector_search_time)));
             }
             if timing.hybrid_search_time > Duration::ZERO {
-                entries.insert("search_execution > hybrid_search".to_string(), timing.hybrid_search_time);
+                entries.insert("search_execution > hybrid_search".to_string(), serde_json::Value::String(format!("{:.2?}", timing.hybrid_search_time)));
             }
             if timing.embedding_time > Duration::ZERO {
-                entries.insert("search_execution > embedding".to_string(), timing.embedding_time);
+                entries.insert("search_execution > embedding".to_string(), serde_json::Value::String(format!("{:.2?}", timing.embedding_time)));
             }
             
             // Ranking rules
             if timing.words_ranking_time > Duration::ZERO {
-                entries.insert("search_execution > ranking > words".to_string(), timing.words_ranking_time);
+                entries.insert("search_execution > ranking > words".to_string(), serde_json::Value::String(format!("{:.2?}", timing.words_ranking_time)));
             }
             if timing.typo_ranking_time > Duration::ZERO {
-                entries.insert("search_execution > ranking > typo".to_string(), timing.typo_ranking_time);
+                entries.insert("search_execution > ranking > typo".to_string(), serde_json::Value::String(format!("{:.2?}", timing.typo_ranking_time)));
             }
             if timing.proximity_ranking_time > Duration::ZERO {
-                entries.insert("search_execution > ranking > proximity".to_string(), timing.proximity_ranking_time);
+                entries.insert("search_execution > ranking > proximity".to_string(), serde_json::Value::String(format!("{:.2?}", timing.proximity_ranking_time)));
             }
             if timing.attribute_ranking_time > Duration::ZERO {
-                entries.insert("search_execution > ranking > attribute".to_string(), timing.attribute_ranking_time);
+                entries.insert("search_execution > ranking > attribute".to_string(), serde_json::Value::String(format!("{:.2?}", timing.attribute_ranking_time)));
             }
             if timing.exactness_ranking_time > Duration::ZERO {
-                entries.insert("search_execution > ranking > exactness".to_string(), timing.exactness_ranking_time);
+                entries.insert("search_execution > ranking > exactness".to_string(), serde_json::Value::String(format!("{:.2?}", timing.exactness_ranking_time)));
             }
             if timing.sort_ranking_time > Duration::ZERO {
-                entries.insert("search_execution > ranking > sort".to_string(), timing.sort_ranking_time);
+                entries.insert("search_execution > ranking > sort".to_string(), serde_json::Value::String(format!("{:.2?}", timing.sort_ranking_time)));
             }
             
             // Geographic operations
             if timing.geo_filter_time > Duration::ZERO {
-                entries.insert("search_execution > geo > filter".to_string(), timing.geo_filter_time);
+                entries.insert("search_execution > geo > filter".to_string(), serde_json::Value::String(format!("{:.2?}", timing.geo_filter_time)));
             }
             if timing.geo_sort_time > Duration::ZERO {
-                entries.insert("search_execution > geo > sort".to_string(), timing.geo_sort_time);
+                entries.insert("search_execution > geo > sort".to_string(), serde_json::Value::String(format!("{:.2?}", timing.geo_sort_time)));
             }
             if timing.geo_sort_compute_time > Duration::ZERO {
-                entries.insert("search_execution > geo > sort > compute".to_string(), timing.geo_sort_compute_time);
+                entries.insert("search_execution > geo > sort > compute".to_string(), serde_json::Value::String(format!("{:.2?}", timing.geo_sort_compute_time)));
             }
             if timing.geo_bucket_sort_time > Duration::ZERO {
-                entries.insert("search_execution > geo > sort > bucket".to_string(), timing.geo_bucket_sort_time);
+                entries.insert("search_execution > geo > sort > bucket".to_string(), serde_json::Value::String(format!("{:.2?}", timing.geo_bucket_sort_time)));
             }
             
             // Cache and database
             if timing.cache_lookup_time > Duration::ZERO {
-                entries.insert("search_execution > cache > lookup".to_string(), timing.cache_lookup_time);
+                entries.insert("search_execution > cache > lookup".to_string(), serde_json::Value::String(format!("{:.2?}", timing.cache_lookup_time)));
             }
             if timing.database_read_time > Duration::ZERO {
-                entries.insert("search_execution > database > read".to_string(), timing.database_read_time);
+                entries.insert("search_execution > database > read".to_string(), serde_json::Value::String(format!("{:.2?}", timing.database_read_time)));
             }
             if timing.filter_application_time > Duration::ZERO {
-                entries.insert("search_execution > database > filter".to_string(), timing.filter_application_time);
+                entries.insert("search_execution > database > filter".to_string(), serde_json::Value::String(format!("{:.2?}", timing.filter_application_time)));
             }
         }
         
         // Result formatting hierarchy
         if timing.result_formatting_time > Duration::ZERO {
-            entries.insert("result_formatting".to_string(), timing.result_formatting_time);
+            entries.insert("result_formatting".to_string(), serde_json::Value::String(format!("{:.2?}", timing.result_formatting_time)));
             
             if timing.result_sorting_time > Duration::ZERO {
-                entries.insert("result_formatting > sorting".to_string(), timing.result_sorting_time);
+                entries.insert("result_formatting > sorting".to_string(), serde_json::Value::String(format!("{:.2?}", timing.result_sorting_time)));
             }
             if timing.distinct_processing_time > Duration::ZERO {
-                entries.insert("result_formatting > distinct".to_string(), timing.distinct_processing_time);
+                entries.insert("result_formatting > distinct".to_string(), serde_json::Value::String(format!("{:.2?}", timing.distinct_processing_time)));
             }
             if timing.pagination_time > Duration::ZERO {
-                entries.insert("result_formatting > pagination".to_string(), timing.pagination_time);
+                entries.insert("result_formatting > pagination".to_string(), serde_json::Value::String(format!("{:.2?}", timing.pagination_time)));
             }
         }
         
         // Facet operations hierarchy
         if timing.facet_distribution_time > Duration::ZERO || timing.facet_stats_time > Duration::ZERO || timing.facet_search_time > Duration::ZERO {
             let total_facet_time = timing.facet_distribution_time + timing.facet_stats_time + timing.facet_search_time;
-            entries.insert("facets".to_string(), total_facet_time);
+            entries.insert("facets".to_string(), serde_json::Value::String(format!("{:.2?}", total_facet_time)));
             
             if timing.facet_distribution_time > Duration::ZERO {
-                entries.insert("facets > distribution".to_string(), timing.facet_distribution_time);
+                entries.insert("facets > distribution".to_string(), serde_json::Value::String(format!("{:.2?}", timing.facet_distribution_time)));
             }
             if timing.facet_stats_time > Duration::ZERO {
-                entries.insert("facets > stats".to_string(), timing.facet_stats_time);
+                entries.insert("facets > stats".to_string(), serde_json::Value::String(format!("{:.2?}", timing.facet_stats_time)));
             }
             if timing.facet_search_time > Duration::ZERO {
-                entries.insert("facets > search".to_string(), timing.facet_search_time);
+                entries.insert("facets > search".to_string(), serde_json::Value::String(format!("{:.2?}", timing.facet_search_time)));
             }
             
             // Per-attribute facet timing
             for (attr, duration) in &timing.facet_attribute_timing {
                 if *duration > Duration::ZERO {
-                    entries.insert(format!("facets > attribute > {}", attr), *duration);
+                    entries.insert(format!("facets > attribute > {}", attr), serde_json::Value::String(format!("{:.2?}", duration)));
                 }
             }
         }
@@ -1190,14 +1190,14 @@ impl SearchTimingHierarchy {
         // Per-attribute filter timing
         for (attr, duration) in &timing.filter_attribute_timing {
             if *duration > Duration::ZERO {
-                entries.insert(format!("search_execution > database > filter > {}", attr), *duration);
+                entries.insert(format!("search_execution > database > filter > {}", attr), serde_json::Value::String(format!("{:.2?}", duration)));
             }
         }
         
         // Additional timing entries
         for (key, duration) in &timing.additional_timing {
             if *duration > Duration::ZERO {
-                entries.insert(format!("additional > {}", key), *duration);
+                entries.insert(format!("additional > {}", key), serde_json::Value::String(format!("{:.2?}", duration)));
             }
         }
         
