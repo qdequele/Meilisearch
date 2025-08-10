@@ -253,6 +253,8 @@ impl<'a> Filter<'a> {
             }))?;
         }
 
+        let span = tracing::trace_span!(target: "search::geo::filter", "geo_filter_evaluation");
+        let _enter = span.enter();
         self.inner_evaluate(rtxn, index, &fields_ids_map, &filterable_attributes_rules, None)
     }
 

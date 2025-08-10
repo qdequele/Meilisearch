@@ -1180,6 +1180,9 @@ pub fn prepare_search<'t>(
     let offset = min(offset, max_total_hits);
     let limit = min(limit, max_total_hits.saturating_sub(offset));
 
+    let span = tracing::trace_span!(target: "search::results::limit", "pagination");
+    let _enter = span.enter();
+    
     search.offset(offset);
     search.limit(limit);
 
@@ -1732,6 +1735,9 @@ fn make_hits<'a>(
     matching_words: milli::MatchingWords,
     documents_ids_scores: impl Iterator<Item = (u32, &'a Vec<ScoreDetails>)> + 'a,
 ) -> milli::Result<Vec<SearchHit>> {
+    let span = tracing::trace_span!(target: "search::results::format", "result_formatting");
+    let _enter = span.enter();
+    
     let mut documents = Vec::new();
 
     let dictionary = index.dictionary(rtxn)?;
