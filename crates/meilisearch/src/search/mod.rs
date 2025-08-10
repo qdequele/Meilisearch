@@ -1028,6 +1028,12 @@ pub struct SearchTiming {
     // TODO: Not implemented yet - needs timing spans in filter application
     pub filter_application_time: Duration,
     
+    // Per-attribute timing for facets and filters
+    // TODO: Not implemented yet - needs timing spans for each individual facet attribute
+    pub facet_attribute_timing: BTreeMap<String, Duration>,
+    // TODO: Not implemented yet - needs timing spans for each individual filter attribute
+    pub filter_attribute_timing: BTreeMap<String, Duration>,
+    
     // Additional custom timings
     pub additional_timing: BTreeMap<String, Duration>,
 }
@@ -1341,6 +1347,8 @@ pub fn perform_search(
         cache_lookup_time: Duration::from_secs(0),
         database_read_time: Duration::from_secs(0),
         filter_application_time: Duration::from_secs(0),
+        facet_attribute_timing: BTreeMap::new(),
+        filter_attribute_timing: BTreeMap::new(),
         additional_timing: BTreeMap::new(),
     };
 
@@ -2325,6 +2333,8 @@ where
         cache_lookup_time: Duration::from_secs(0),
         database_read_time: Duration::from_secs(0),
         filter_application_time: Duration::from_secs(0),
+        facet_attribute_timing: BTreeMap::new(),
+        filter_attribute_timing: BTreeMap::new(),
         additional_timing: BTreeMap::new(),
     };
 
