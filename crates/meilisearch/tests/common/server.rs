@@ -35,7 +35,7 @@ pub struct Server<State = Owned> {
 pub static TEST_TEMP_DIR: Lazy<TempDir> = Lazy::new(|| TempDir::new().unwrap());
 
 impl Server<Owned> {
-    fn into_shared(self) -> Server<Shared> {
+    pub(super) fn into_shared(self) -> Server<Shared> {
         Server { service: self.service, _dir: self._dir, _marker: PhantomData }
     }
 
@@ -97,6 +97,7 @@ impl Server<Owned> {
         self.use_api_key(master_key);
         let (response, code) = self.list_api_keys("").await;
         assert_eq!(200, code, "{:?}", response);
+        // TODO: relying on the order of keys is not ideal, we should use the name instead
         let admin_key = &response["results"][1]["key"];
         self.use_api_key(admin_key.as_str().unwrap());
     }
@@ -179,6 +180,25 @@ impl Server<Owned> {
 
     pub async fn set_network(&self, value: Value) -> (Value, StatusCode) {
         self.service.patch("/network", value).await
+    }
+
+    pub async fn create_webhook(&self, value: Value) -> (Value, StatusCode) {
+        self.service.post("/webhooks", value).await
+    }
+
+    pub async fn get_webhook(&self, uuid: impl AsRef<str>) -> (Value, StatusCode) {
+        let url = format!("/webhooks/{}", uuid.as_ref());
+        self.service.get(url).await
+    }
+
+    pub async fn delete_webhook(&self, uuid: impl AsRef<str>) -> (Value, StatusCode) {
+        let url = format!("/webhooks/{}", uuid.as_ref());
+        self.service.delete(url).await
+    }
+
+    pub async fn patch_webhook(&self, uuid: impl AsRef<str>, value: Value) -> (Value, StatusCode) {
+        let url = format!("/webhooks/{}", uuid.as_ref());
+        self.service.patch(url, value).await
     }
 
     pub async fn get_metrics(&self) -> (Value, StatusCode) {
@@ -446,6 +466,10 @@ impl<State> Server<State> {
     pub async fn get_network(&self) -> (Value, StatusCode) {
         self.service.get("/network").await
     }
+
+    pub async fn get_webhooks(&self) -> (Value, StatusCode) {
+        self.service.get("/webhooks").await
+    }
 }
 
 pub fn default_settings(dir: impl AsRef<Path>) -> Opt {
@@ -465,6 +489,7 @@ pub fn default_settings(dir: impl AsRef<Path>) -> Opt {
             // Having 2 threads makes the tests way faster
             max_indexing_threads: MaxThreads::from_str("2").unwrap(),
             experimental_no_edition_2024_for_settings: false,
+            experimental_no_edition_2024_for_dumps: false,
         },
         experimental_enable_metrics: false,
         ..Parser::parse_from(None as Option<&str>)

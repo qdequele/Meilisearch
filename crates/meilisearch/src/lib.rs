@@ -30,6 +30,7 @@ use actix_web::web::Data;
 use actix_web::{web, HttpRequest};
 use analytics::Analytics;
 use anyhow::bail;
+use bumpalo::Bump;
 use error::PayloadError;
 use extractors::payload::PayloadConfig;
 use index_scheduler::versioning::Versioning;
@@ -38,6 +39,7 @@ use meilisearch_auth::{open_auth_store_env, AuthController};
 use meilisearch_types::milli::constants::VERSION_MAJOR;
 use meilisearch_types::milli::documents::{DocumentsBatchBuilder, DocumentsBatchReader};
 use meilisearch_types::milli::progress::{EmbedderStats, Progress};
+use meilisearch_types::milli::update::new::indexer;
 use meilisearch_types::milli::update::{
     default_thread_pool_and_threads, IndexDocumentsConfig, IndexDocumentsMethod, IndexerConfig,
 };
@@ -221,8 +223,8 @@ pub fn setup_meilisearch(opt: &Opt) -> anyhow::Result<(Arc<IndexScheduler>, Arc<
         indexes_path: opt.db_path.join("indexes"),
         snapshots_path: opt.snapshot_dir.clone(),
         dumps_path: opt.dump_dir.clone(),
-        webhook_url: opt.task_webhook_url.as_ref().map(|url| url.to_string()),
-        webhook_authorization_header: opt.task_webhook_authorization_header.clone(),
+        cli_webhook_url: opt.task_webhook_url.as_ref().map(|url| url.to_string()),
+        cli_webhook_authorization: opt.task_webhook_authorization_header.clone(),
         task_db_size: opt.max_task_db_size.as_u64() as usize,
         index_base_map_size: opt.max_index_size.as_u64() as usize,
         enable_mdb_writemap: opt.experimental_reduce_indexing_memory_usage,
@@ -489,7 +491,12 @@ fn import_dump(
         let _ = std::fs::write(db_path.join("instance-uid"), instance_uid.to_string().as_bytes());
     };
 
-    // 2. Import the `Key`s.
+    // 2. Import the webhooks
+    if let Some(webhooks) = dump_reader.webhooks() {
+        index_scheduler.update_runtime_webhooks(webhooks.webhooks.clone())?;
+    }
+
+    // 3. Import the `Key`s.
     let mut keys = Vec::new();
     auth.raw_delete_all_keys()?;
     for key in dump_reader.keys()? {
@@ -498,20 +505,20 @@ fn import_dump(
         keys.push(key);
     }
 
-    // 3. Import the `ChatCompletionSettings`s.
+    // 4. Import the `ChatCompletionSettings`s.
     for result in dump_reader.chat_completions_settings()? {
         let (name, settings) = result?;
         index_scheduler.put_chat_settings(&name, &settings)?;
     }
 
-    // 4. Import the runtime features and network
+    // 5. Import the runtime features and network
     let features = dump_reader.features()?.unwrap_or_default();
     index_scheduler.put_runtime_features(features)?;
 
     let network = dump_reader.network()?.cloned().unwrap_or_default();
     index_scheduler.put_network(network)?;
 
-    // 4.1 Use all cpus to process dump if `max_indexing_threads` not configured
+    // 5.1 Use all cpus to process dump if `max_indexing_threads` not configured
     let backup_config;
     let base_config = index_scheduler.indexer_config();
 
@@ -528,12 +535,12 @@ fn import_dump(
     // /!\ The tasks must be imported AFTER importing the indexes or else the scheduler might
     // try to process tasks while we're trying to import the indexes.
 
-    // 5. Import the indexes.
+    // 6. Import the indexes.
     for index_reader in dump_reader.indexes()? {
         let mut index_reader = index_reader?;
         let metadata = index_reader.metadata();
         let uid = metadata.uid.clone();
-        tracing::info!("Importing index `{}`.", metadata.uid);
+        tracing::info!("Importing index `{uid}`.");
 
         let date = Some((metadata.created_at, metadata.updated_at));
         let index = index_scheduler.create_raw_index(&metadata.uid, date)?;
@@ -541,71 +548,123 @@ fn import_dump(
         let mut wtxn = index.write_txn()?;
 
         let mut builder = milli::update::Settings::new(&mut wtxn, &index, indexer_config);
-        // 5.1 Import the primary key if there is one.
+        // 6.1 Import the primary key if there is one.
         if let Some(ref primary_key) = metadata.primary_key {
             builder.set_primary_key(primary_key.to_string());
         }
 
-        // 5.2 Import the settings.
+        // 6.2 Import the settings.
         tracing::info!("Importing the settings.");
         let settings = index_reader.settings()?;
         apply_settings_to_builder(&settings, &mut builder);
         let embedder_stats: Arc<EmbedderStats> = Default::default();
         builder.execute(&|| false, &progress, embedder_stats.clone())?;
+        wtxn.commit()?;
 
-        // 5.3 Import the documents.
-        // 5.3.1 We need to recreate the grenad+obkv format accepted by the index.
-        tracing::info!("Importing the documents.");
-        let file = tempfile::tempfile()?;
-        let mut builder = DocumentsBatchBuilder::new(BufWriter::new(file));
-        for document in index_reader.documents()? {
-            builder.append_json_object(&document?)?;
+        let mut wtxn = index.write_txn()?;
+        let rtxn = index.read_txn()?;
+
+        if index_scheduler.no_edition_2024_for_dumps() {
+            // 6.3 Import the documents.
+            // 6.3.1 We need to recreate the grenad+obkv format accepted by the index.
+            tracing::info!("Importing the documents.");
+            let file = tempfile::tempfile()?;
+            let mut builder = DocumentsBatchBuilder::new(BufWriter::new(file));
+            for document in index_reader.documents()? {
+                builder.append_json_object(&document?)?;
+            }
+
+            // This flush the content of the batch builder.
+            let file = builder.into_inner()?.into_inner()?;
+
+            // 6.3.2 We feed it to the milli index.
+            let reader = BufReader::new(file);
+            let reader = DocumentsBatchReader::from_reader(reader)?;
+
+            let embedder_configs = index.embedding_configs().embedding_configs(&wtxn)?;
+            let embedders = index_scheduler.embedders(uid.to_string(), embedder_configs)?;
+
+            let builder = milli::update::IndexDocuments::new(
+                &mut wtxn,
+                &index,
+                indexer_config,
+                IndexDocumentsConfig {
+                    update_method: IndexDocumentsMethod::ReplaceDocuments,
+                    ..Default::default()
+                },
+                |indexing_step| tracing::trace!("update: {:?}", indexing_step),
+                || false,
+                &embedder_stats,
+            )?;
+
+            let builder = builder.with_embedders(embedders);
+
+            let (builder, user_result) = builder.add_documents(reader)?;
+            let user_result = user_result?;
+            tracing::info!(documents_found = user_result, "{} documents found.", user_result);
+            builder.execute()?;
+        } else {
+            let db_fields_ids_map = index.fields_ids_map(&rtxn)?;
+            let primary_key = index.primary_key(&rtxn)?;
+            let mut new_fields_ids_map = db_fields_ids_map.clone();
+
+            let mut indexer = indexer::DocumentOperation::new();
+            let embedders = index.embedding_configs().embedding_configs(&rtxn)?;
+            let embedders = index_scheduler.embedders(uid.clone(), embedders)?;
+
+            let mmap = unsafe { memmap2::Mmap::map(index_reader.documents_file())? };
+
+            indexer.replace_documents(&mmap)?;
+
+            let indexer_config = index_scheduler.indexer_config();
+            let pool = &indexer_config.thread_pool;
+
+            let indexer_alloc = Bump::new();
+            let (document_changes, mut operation_stats, primary_key) = indexer.into_changes(
+                &indexer_alloc,
+                &index,
+                &rtxn,
+                primary_key,
+                &mut new_fields_ids_map,
+                &|| false, // never stop processing a dump
+                progress.clone(),
+            )?;
+
+            let operation_stats = operation_stats.pop().unwrap();
+            if let Some(error) = operation_stats.error {
+                return Err(error.into());
+            }
+
+            let _congestion = indexer::index(
+                &mut wtxn,
+                &index,
+                pool,
+                indexer_config.grenad_parameters(),
+                &db_fields_ids_map,
+                new_fields_ids_map,
+                primary_key,
+                &document_changes,
+                embedders,
+                &|| false, // never stop processing a dump
+                &progress,
+                &embedder_stats,
+            )?;
         }
 
-        // This flush the content of the batch builder.
-        let file = builder.into_inner()?.into_inner()?;
-
-        // 5.3.2 We feed it to the milli index.
-        let reader = BufReader::new(file);
-        let reader = DocumentsBatchReader::from_reader(reader)?;
-
-        let embedder_configs = index.embedding_configs().embedding_configs(&wtxn)?;
-        let embedders = index_scheduler.embedders(uid.to_string(), embedder_configs)?;
-
-        let builder = milli::update::IndexDocuments::new(
-            &mut wtxn,
-            &index,
-            indexer_config,
-            IndexDocumentsConfig {
-                update_method: IndexDocumentsMethod::ReplaceDocuments,
-                ..Default::default()
-            },
-            |indexing_step| tracing::trace!("update: {:?}", indexing_step),
-            || false,
-            &embedder_stats,
-        )?;
-
-        let builder = builder.with_embedders(embedders);
-
-        let (builder, user_result) = builder.add_documents(reader)?;
-        let user_result = user_result?;
-        tracing::info!(documents_found = user_result, "{} documents found.", user_result);
-        builder.execute()?;
         wtxn.commit()?;
         tracing::info!("All documents successfully imported.");
-
         index_scheduler.refresh_index_stats(&uid)?;
     }
 
-    // 6. Import the queue
+    // 7. Import the queue
     let mut index_scheduler_dump = index_scheduler.register_dumped_task()?;
-    // 6.1. Import the batches
+    // 7.1. Import the batches
     for ret in dump_reader.batches()? {
         let batch = ret?;
         index_scheduler_dump.register_dumped_batch(batch)?;
     }
 
-    // 6.2. Import the tasks
+    // 7.2. Import the tasks
     for ret in dump_reader.tasks()? {
         let (task, file) = ret?;
         index_scheduler_dump.register_dumped_task(task, file)?;
