@@ -97,6 +97,9 @@ impl QueryGraph {
         // The terms here must be consecutive
         terms: &[LocatedQueryTerm],
     ) -> Result<(QueryGraph, Vec<LocatedQueryTerm>)> {
+        let span = tracing::trace_span!(target: "search::query::parse", "query_parsing");
+        let _entered = span.enter();
+        
         let mut new_located_query_terms = terms.to_vec();
 
         let nbr_typos = number_of_typos_allowed(ctx)?;
@@ -173,7 +176,12 @@ impl QueryGraph {
             node.data = node_data;
         }
         let mut graph = QueryGraph { root_node, end_node, nodes };
-        graph.build_initial_edges();
+        
+        {
+            let span = tracing::trace_span!(target: "search::query::tree_build", "query_tree_build");
+            let _entered = span.enter();
+            graph.build_initial_edges();
+        }
 
         Ok((graph, new_located_query_terms))
     }
@@ -224,6 +232,9 @@ impl QueryGraph {
     /// Simplify the query graph by removing all nodes that are disconnected from
     /// the start or end nodes.
     pub fn simplify(&mut self) {
+        let span = tracing::trace_span!(target: "search::query::simplify", "query_tree_simplify");
+        let _entered = span.enter();
+        
         loop {
             let mut nodes_to_remove = vec![];
             for (node_idx, node) in self.nodes.iter() {

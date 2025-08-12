@@ -2127,3 +2127,42 @@ async fn simple_search_changing_unrelated_settings() {
         })
         .await;
 }
+
+#[actix_rt::test]
+async fn test_search_timing_structure() {
+    let server = Server::new_shared();
+    let index = server.unique_index();
+
+    let documents = DOCUMENTS.clone();
+    let (task, _status_code) = index.add_documents(documents, None).await;
+    server.wait_task(task.uid()).await.succeeded();
+
+    index
+        .search(json!({"q": "Dragon"}), |response, code| {
+            assert_eq!(code, 200, "{response}");
+            
+            // Check that detailed_timing is present
+            assert!(response.get("detailed_timing").is_some(), "detailed_timing field should be present");
+            
+            let detailed_timing = response.get("detailed_timing").unwrap();
+            assert!(detailed_timing.is_object(), "detailed_timing should be an object");
+            
+            // Check that processing_time_ms is present
+            assert!(detailed_timing.get("processing_time_ms").is_some(), "processing_time_ms should be present in detailed_timing");
+            
+            // Check that processing_time_ms is a string value
+            let processing_time = detailed_timing.get("processing_time_ms").unwrap();
+            assert!(processing_time.is_string(), "processing_time_ms should be a string");
+            
+            // Verify the timing value is in the expected format (e.g., "X.XXms")
+            let processing_time_str = processing_time.as_str().unwrap();
+            assert!(processing_time_str.ends_with("ms") || processing_time_str.ends_with("ns"), 
+                   "processing_time_ms should end with 'ms' or 'ns', got: {}", processing_time_str);
+            
+            // Check that hits are present
+            assert!(response.get("hits").is_some(), "hits field should be present");
+            let hits = response.get("hits").unwrap().as_array().unwrap();
+            assert_eq!(hits.len(), 1, "Should find 1 hit for 'Dragon'");
+        })
+        .await;
+}

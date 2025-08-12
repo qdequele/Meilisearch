@@ -298,6 +298,9 @@ impl<'a> FacetDistribution<'a> {
         let filterable_attributes_rules = self.index.filterable_attributes_rules(self.rtxn)?;
         self.check_faceted_fields(&filterable_attributes_rules)?;
 
+        let span = tracing::trace_span!(target: "search::facets::stats", "facet_stats_computation");
+        let _enter = span.enter();
+        
         let mut distribution = BTreeMap::new();
         for (fid, name) in fields_ids_map.iter() {
             if self.select_field(name, &filterable_attributes_rules) {
@@ -334,6 +337,9 @@ impl<'a> FacetDistribution<'a> {
         let filterable_attributes_rules = self.index.filterable_attributes_rules(self.rtxn)?;
         self.check_faceted_fields(&filterable_attributes_rules)?;
 
+        let span = tracing::trace_span!(target: "search::facets::distribution", "facet_distribution_execution");
+        let _enter = span.enter();
+        
         let mut distribution = BTreeMap::new();
         for (fid, name) in fields_ids_map.iter() {
             if self.select_field(name, &filterable_attributes_rules) {

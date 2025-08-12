@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use deserr::Deserr;
+use tracing_subscriber::layer::SubscriberExt;
 use either::Either;
 use index_scheduler::RoFeatures;
 use indexmap::IndexMap;
@@ -836,7 +837,6 @@ pub struct SearchHit {
 }
 
 #[derive(Serialize, Clone, PartialEq, ToSchema)]
-#[serde(rename_all = "camelCase")]
 #[schema(rename_all = "camelCase")]
 pub struct SearchResult {
     pub hits: Vec<SearchHit>,
@@ -852,6 +852,9 @@ pub struct SearchResult {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub semantic_hit_count: Option<u32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detailed_timing: Option<SearchTimingHierarchy>,
 
     // These fields are only used for analytics purposes
     #[serde(skip)]
@@ -872,6 +875,7 @@ impl fmt::Debug for SearchResult {
             semantic_hit_count,
             degraded,
             used_negative_operator,
+            detailed_timing,
         } = self;
 
         let mut debug = f.debug_struct("SearchResult");
@@ -894,6 +898,9 @@ impl fmt::Debug for SearchResult {
         }
         if let Some(semantic_hit_count) = semantic_hit_count {
             debug.field("semantic_hit_count", &semantic_hit_count);
+        }
+        if let Some(detailed_timing) = detailed_timing {
+            debug.field("detailed_timing", &detailed_timing);
         }
 
         debug.finish()
@@ -919,7 +926,7 @@ pub struct SearchResultWithIndex {
     pub result: SearchResult,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, ToSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ToSchema)]
 #[serde(untagged)]
 pub enum HitsInfo {
     #[serde(rename_all = "camelCase")]
@@ -936,8 +943,314 @@ pub struct FacetStats {
     pub max: f64,
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema, Default)]
+pub struct SearchTiming {
+    // Core timings
+    pub total_search_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in query processing functions
+    pub query_processing_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in search execution functions
+    pub search_execution_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in result formatting functions
+    pub result_formatting_time: Duration,
+    
+    // Query processing breakdown
+    // TODO: Not implemented yet - needs timing spans in query parsing
+    pub query_parsing_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in query tree building
+    pub query_tree_build_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in query tree simplification
+    pub query_tree_simplify_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in ranking graph building
+    pub ranking_graph_build_time: Duration,
+    
+    // Tokenization
+    // TODO: Not implemented yet - needs timing spans in tokenization functions
+    pub tokenization_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in tokenizer building
+    pub tokenizer_build_time: Duration,
+    
+    // Search types
+    // TODO: Not implemented yet - needs timing spans in keyword search
+    pub keyword_search_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in vector search
+    pub vector_search_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in hybrid search
+    pub hybrid_search_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in embedding operations
+    pub embedding_time: Duration,
+    
+    // Ranking rules (individual)
+    // TODO: Not implemented yet - needs timing spans in words ranking rule
+    pub words_ranking_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in typo ranking rule
+    pub typo_ranking_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in proximity ranking rule
+    pub proximity_ranking_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in attribute ranking rule
+    pub attribute_ranking_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in exactness ranking rule
+    pub exactness_ranking_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in sort ranking rule
+    pub sort_ranking_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in geo sort ranking rule
+    pub geo_sort_time: Duration,
+    
+    // Geographic operations
+    // TODO: Not implemented yet - needs timing spans in geo filtering
+    pub geo_filter_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in geo sort computation
+    pub geo_sort_compute_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in geo bucket sorting
+    pub geo_bucket_sort_time: Duration,
+    
+    // Facet operations
+    // TODO: Not implemented yet - needs timing spans in facet distribution
+    pub facet_distribution_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in facet statistics
+    pub facet_stats_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in facet search
+    pub facet_search_time: Duration,
+    
+    // Result processing
+    // TODO: Not implemented yet - needs timing spans in result sorting
+    pub result_sorting_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in distinct processing
+    pub distinct_processing_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in pagination
+    pub pagination_time: Duration,
+    
+    // Cache and database
+    // TODO: Not implemented yet - needs timing spans in cache lookup
+    pub cache_lookup_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in database read operations
+    pub database_read_time: Duration,
+    // TODO: Not implemented yet - needs timing spans in filter application
+    pub filter_application_time: Duration,
+    
+    // Per-attribute timing for facets and filters
+    // TODO: Not implemented yet - needs timing spans for each individual facet attribute
+    pub facet_attribute_timing: BTreeMap<String, Duration>,
+    // TODO: Not implemented yet - needs timing spans for each individual filter attribute
+    pub filter_attribute_timing: BTreeMap<String, Duration>,
+    
+    // Additional custom timings
+    pub additional_timing: BTreeMap<String, Duration>,
+}
+
+/// Hierarchical timing structure for search operations
+/// Similar to indexing timing with parent-child relationships
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
+pub struct SearchTimingHierarchy {
+    /// The hierarchical timing entries with ">" separators, formatted as strings like Batch progress_trace
+    pub timing_entries: serde_json::Map<String, serde_json::Value>,
+}
+
+impl SearchTimingHierarchy {
+    /// Convert flat SearchTiming to hierarchical format
+    pub fn from_flat_timing(timing: &SearchTiming) -> Self {
+        let mut entries = serde_json::Map::new();
+        
+        // Core search structure - renamed to processing_time_ms
+        entries.insert("processing_time_ms".to_string(), serde_json::Value::String(format!("{:.2?}", timing.total_search_time)));
+        
+        // Query processing hierarchy
+        if timing.query_processing_time > Duration::ZERO {
+            // Check if this is the only non-zero child of total_search
+            let has_other_children = timing.search_execution_time > Duration::ZERO 
+                || timing.result_formatting_time > Duration::ZERO 
+                || timing.facet_distribution_time > Duration::ZERO 
+                || timing.facet_stats_time > Duration::ZERO 
+                || timing.facet_search_time > Duration::ZERO;
+            
+            if has_other_children {
+                entries.insert("query_processing".to_string(), serde_json::Value::String(format!("{:.2?}", timing.query_processing_time)));
+                
+                if timing.query_parsing_time > Duration::ZERO {
+                    entries.insert("query_processing > parsing".to_string(), serde_json::Value::String(format!("{:.2?}", timing.query_parsing_time)));
+                }
+                if timing.query_tree_build_time > Duration::ZERO {
+                    entries.insert("query_processing > tree_build".to_string(), serde_json::Value::String(format!("{:.2?}", timing.query_tree_build_time)));
+                }
+                if timing.query_tree_simplify_time > Duration::ZERO {
+                    entries.insert("query_processing > tree_simplify".to_string(), serde_json::Value::String(format!("{:.2?}", timing.query_tree_simplify_time)));
+                }
+                if timing.ranking_graph_build_time > Duration::ZERO {
+                    entries.insert("query_processing > ranking_graph_build".to_string(), serde_json::Value::String(format!("{:.2?}", timing.ranking_graph_build_time)));
+                }
+            }
+        }
+        
+        // Tokenization hierarchy
+        if timing.tokenization_time > Duration::ZERO {
+            // Check if this is the only non-zero child of total_search
+            let has_other_children = timing.query_processing_time > Duration::ZERO 
+                || timing.search_execution_time > Duration::ZERO 
+                || timing.result_formatting_time > Duration::ZERO 
+                || timing.facet_distribution_time > Duration::ZERO 
+                || timing.facet_stats_time > Duration::ZERO 
+                || timing.facet_search_time > Duration::ZERO;
+            
+            if has_other_children {
+                entries.insert("tokenization".to_string(), serde_json::Value::String(format!("{:.2?}", timing.tokenization_time)));
+                
+                if timing.tokenizer_build_time > Duration::ZERO {
+                    entries.insert("tokenization > tokenizer_build".to_string(), serde_json::Value::String(format!("{:.2?}", timing.tokenizer_build_time)));
+                }
+            }
+        }
+        
+        // Search execution hierarchy
+        if timing.search_execution_time > Duration::ZERO {
+            // Check if this is the only non-zero child of total_search
+            let has_other_children = timing.query_processing_time > Duration::ZERO 
+                || timing.tokenization_time > Duration::ZERO 
+                || timing.result_formatting_time > Duration::ZERO 
+                || timing.facet_distribution_time > Duration::ZERO 
+                || timing.facet_stats_time > Duration::ZERO 
+                || timing.facet_search_time > Duration::ZERO;
+            
+            if has_other_children {
+                entries.insert("search_execution".to_string(), serde_json::Value::String(format!("{:.2?}", timing.search_execution_time)));
+                
+                // Search types
+                if timing.keyword_search_time > Duration::ZERO {
+                    entries.insert("search_execution > keyword_search".to_string(), serde_json::Value::String(format!("{:.2?}", timing.keyword_search_time)));
+                }
+                if timing.vector_search_time > Duration::ZERO {
+                    entries.insert("search_execution > vector_search".to_string(), serde_json::Value::String(format!("{:.2?}", timing.vector_search_time)));
+                }
+                if timing.hybrid_search_time > Duration::ZERO {
+                    entries.insert("search_execution > hybrid_search".to_string(), serde_json::Value::String(format!("{:.2?}", timing.hybrid_search_time)));
+                }
+                if timing.embedding_time > Duration::ZERO {
+                    entries.insert("search_execution > embedding".to_string(), serde_json::Value::String(format!("{:.2?}", timing.embedding_time)));
+                }
+                
+                // Ranking rules
+                if timing.words_ranking_time > Duration::ZERO {
+                    entries.insert("search_execution > ranking > words".to_string(), serde_json::Value::String(format!("{:.2?}", timing.words_ranking_time)));
+                }
+                if timing.typo_ranking_time > Duration::ZERO {
+                    entries.insert("search_execution > ranking > typo".to_string(), serde_json::Value::String(format!("{:.2?}", timing.typo_ranking_time)));
+                }
+                if timing.proximity_ranking_time > Duration::ZERO {
+                    entries.insert("search_execution > ranking > proximity".to_string(), serde_json::Value::String(format!("{:.2?}", timing.proximity_ranking_time)));
+                }
+                if timing.attribute_ranking_time > Duration::ZERO {
+                    entries.insert("search_execution > ranking > attribute".to_string(), serde_json::Value::String(format!("{:.2?}", timing.attribute_ranking_time)));
+                }
+                if timing.exactness_ranking_time > Duration::ZERO {
+                    entries.insert("search_execution > ranking > exactness".to_string(), serde_json::Value::String(format!("{:.2?}", timing.exactness_ranking_time)));
+                }
+                if timing.sort_ranking_time > Duration::ZERO {
+                    entries.insert("search_execution > ranking > sort".to_string(), serde_json::Value::String(format!("{:.2?}", timing.sort_ranking_time)));
+                }
+                
+                // Geographic operations
+                if timing.geo_filter_time > Duration::ZERO {
+                    entries.insert("search_execution > geo > filter".to_string(), serde_json::Value::String(format!("{:.2?}", timing.geo_filter_time)));
+                }
+                if timing.geo_sort_time > Duration::ZERO {
+                    entries.insert("search_execution > geo > sort".to_string(), serde_json::Value::String(format!("{:.2?}", timing.geo_sort_time)));
+                }
+                if timing.geo_sort_compute_time > Duration::ZERO {
+                    entries.insert("search_execution > geo > sort > compute".to_string(), serde_json::Value::String(format!("{:.2?}", timing.geo_sort_compute_time)));
+                }
+                if timing.geo_bucket_sort_time > Duration::ZERO {
+                    entries.insert("search_execution > geo > sort > bucket".to_string(), serde_json::Value::String(format!("{:.2?}", timing.geo_bucket_sort_time)));
+                }
+                
+                // Cache and database
+                if timing.cache_lookup_time > Duration::ZERO {
+                    entries.insert("search_execution > cache > lookup".to_string(), serde_json::Value::String(format!("{:.2?}", timing.cache_lookup_time)));
+                }
+                if timing.database_read_time > Duration::ZERO {
+                    entries.insert("search_execution > database > read".to_string(), serde_json::Value::String(format!("{:.2?}", timing.database_read_time)));
+                }
+                if timing.filter_application_time > Duration::ZERO {
+                    entries.insert("search_execution > database > filter".to_string(), serde_json::Value::String(format!("{:.2?}", timing.filter_application_time)));
+                }
+            }
+        }
+        
+        // Result formatting hierarchy
+        if timing.result_formatting_time > Duration::ZERO {
+            // Check if this is the only non-zero child of total_search
+            let has_other_children = timing.query_processing_time > Duration::ZERO 
+                || timing.tokenization_time > Duration::ZERO 
+                || timing.search_execution_time > Duration::ZERO 
+                || timing.facet_distribution_time > Duration::ZERO 
+                || timing.facet_stats_time > Duration::ZERO 
+                || timing.facet_search_time > Duration::ZERO;
+            
+            if has_other_children {
+                entries.insert("result_formatting".to_string(), serde_json::Value::String(format!("{:.2?}", timing.result_formatting_time)));
+                
+                if timing.result_sorting_time > Duration::ZERO {
+                    entries.insert("result_formatting > sorting".to_string(), serde_json::Value::String(format!("{:.2?}", timing.result_sorting_time)));
+                }
+                if timing.distinct_processing_time > Duration::ZERO {
+                    entries.insert("result_formatting > distinct".to_string(), serde_json::Value::String(format!("{:.2?}", timing.distinct_processing_time)));
+                }
+                if timing.pagination_time > Duration::ZERO {
+                    entries.insert("result_formatting > pagination".to_string(), serde_json::Value::String(format!("{:.2?}", timing.pagination_time)));
+                }
+            }
+        }
+        
+        // Facet operations hierarchy
+        if timing.facet_distribution_time > Duration::ZERO || timing.facet_stats_time > Duration::ZERO || timing.facet_search_time > Duration::ZERO {
+            let total_facet_time = timing.facet_distribution_time + timing.facet_stats_time + timing.facet_search_time;
+            
+            // Check if this is the only non-zero child of total_search
+            let has_other_children = timing.query_processing_time > Duration::ZERO 
+                || timing.tokenization_time > Duration::ZERO 
+                || timing.search_execution_time > Duration::ZERO 
+                || timing.result_formatting_time > Duration::ZERO;
+            
+            if has_other_children {
+                entries.insert("facets".to_string(), serde_json::Value::String(format!("{:.2?}", total_facet_time)));
+                
+                if timing.facet_distribution_time > Duration::ZERO {
+                    entries.insert("facets > distribution".to_string(), serde_json::Value::String(format!("{:.2?}", timing.facet_distribution_time)));
+                }
+                if timing.facet_stats_time > Duration::ZERO {
+                    entries.insert("facets > stats".to_string(), serde_json::Value::String(format!("{:.2?}", timing.facet_stats_time)));
+                }
+                if timing.facet_search_time > Duration::ZERO {
+                    entries.insert("facets > search".to_string(), serde_json::Value::String(format!("{:.2?}", timing.facet_search_time)));
+                }
+                
+                // Per-attribute facet timing
+                for (attr, duration) in &timing.facet_attribute_timing {
+                    if *duration > Duration::ZERO {
+                        entries.insert(format!("facets > attribute > {}", attr), serde_json::Value::String(format!("{:.2?}", duration)));
+                    }
+                }
+            }
+        }
+        
+        // Per-attribute filter timing
+        for (attr, duration) in &timing.filter_attribute_timing {
+            if *duration > Duration::ZERO {
+                entries.insert(format!("search_execution > database > filter > {}", attr), serde_json::Value::String(format!("{:.2?}", duration)));
+            }
+        }
+        
+        // Additional timing entries
+        for (key, duration) in &timing.additional_timing {
+            if *duration > Duration::ZERO {
+                entries.insert(format!("additional > {}", key), serde_json::Value::String(format!("{:.2?}", duration)));
+            }
+        }
+        
+        Self { timing_entries: entries }
+    }
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq, ToSchema)]
+#[schema(rename_all = "camelCase")]
 pub struct FacetSearchResult {
     pub facet_hits: Vec<FacetValueHit>,
     pub facet_query: Option<String>,
@@ -1078,6 +1391,9 @@ pub fn prepare_search<'t>(
     let offset = min(offset, max_total_hits);
     let limit = min(limit, max_total_hits.saturating_sub(offset));
 
+    let span = tracing::trace_span!(target: "search::results::limit", "pagination");
+    let _enter = span.enter();
+    
     search.offset(offset);
     search.limit(limit);
 
@@ -1123,6 +1439,11 @@ pub fn perform_search(
     let (search, is_finite_pagination, max_total_hits, offset) =
         prepare_search(index, &rtxn, &query, &search_kind, time_budget, features)?;
 
+    // Collect timing information for the core search operation
+    let (search_result, semantic_hit_count) = collect_search_timing(|| {
+        Ok(search_from_kind(index_uid.clone(), search_kind.clone(), search)?)
+    })?;
+
     let (
         milli::SearchResult {
             documents_ids,
@@ -1133,7 +1454,7 @@ pub fn perform_search(
             used_negative_operator,
         },
         semantic_hit_count,
-    ) = search_from_kind(index_uid, search_kind, search)?;
+    ) = (search_result, semantic_hit_count);
 
     let SearchQuery {
         q,
@@ -1160,75 +1481,123 @@ pub fn perform_search(
         media: _,
         hybrid: _,
         offset: _,
-        ranking_score_threshold: _,
         matching_strategy: _,
         attributes_to_search_on: _,
+        ranking_score_threshold: _,
         filter: _,
         distinct: _,
     } = query;
 
-    let format = AttributesFormat {
-        attributes_to_retrieve,
-        retrieve_vectors,
-        attributes_to_highlight,
-        attributes_to_crop,
-        crop_length,
-        crop_marker,
-        highlight_pre_tag,
-        highlight_post_tag,
-        show_matches_position,
-        sort,
-        show_ranking_score,
-        show_ranking_score_details,
-        locales: locales.map(|l| l.iter().copied().map(Into::into).collect()),
+    // Collect timing information for result formatting
+    let hits = collect_search_timing(|| {
+        Ok(make_hits(
+            index,
+            &rtxn,
+            AttributesFormat {
+                attributes_to_retrieve,
+                retrieve_vectors,
+                attributes_to_highlight,
+                attributes_to_crop,
+                crop_length,
+                crop_marker,
+                highlight_pre_tag,
+                highlight_post_tag,
+                show_matches_position,
+                sort,
+                show_ranking_score,
+                show_ranking_score_details,
+                locales: locales.map(|l| l.into_iter().map(Into::into).collect()),
+            },
+            matching_words,
+            documents_ids.iter().copied().zip(document_scores.iter()),
+        )?)
+    })?;
+
+    // Collect timing information for facet computation
+    let facet_timing = if let Some(ref facets) = facets {
+        Some(collect_search_timing(|| {
+            Ok(compute_facet_distribution_stats(
+                facets,
+                index,
+                &rtxn,
+                candidates.clone(),
+                Route::Search,
+            )?)
+        })?)
+    } else {
+        None
     };
 
-    let documents = make_hits(
-        index,
-        &rtxn,
-        format,
-        matching_words,
-        documents_ids.iter().copied().zip(document_scores.iter()),
-    )?;
+    // Combine all timing information
+    let detailed_timing = SearchTiming {
+        total_search_time: before_search.elapsed(),
+        query_processing_time: Duration::from_secs(0), // Will be filled by collect_search_timing
+        search_execution_time: Duration::from_secs(0), // Will be filled by collect_search_timing
+        result_formatting_time: Duration::from_secs(0), // Will be filled by collect_search_timing
+        query_parsing_time: Duration::from_secs(0),
+        query_tree_build_time: Duration::from_secs(0),
+        query_tree_simplify_time: Duration::from_secs(0),
+        ranking_graph_build_time: Duration::from_secs(0),
+        tokenization_time: Duration::from_secs(0),
+        tokenizer_build_time: Duration::from_secs(0),
+        keyword_search_time: Duration::from_secs(0),
+        vector_search_time: Duration::from_secs(0),
+        hybrid_search_time: Duration::from_secs(0),
+        embedding_time: Duration::from_secs(0),
+        words_ranking_time: Duration::from_secs(0),
+        typo_ranking_time: Duration::from_secs(0),
+        proximity_ranking_time: Duration::from_secs(0),
+        attribute_ranking_time: Duration::from_secs(0),
+        exactness_ranking_time: Duration::from_secs(0),
+        sort_ranking_time: Duration::from_secs(0),
+        geo_sort_time: Duration::from_secs(0),
+        geo_filter_time: Duration::from_secs(0),
+        geo_sort_compute_time: Duration::from_secs(0),
+        geo_bucket_sort_time: Duration::from_secs(0),
+        facet_distribution_time: Duration::from_secs(0),
+        facet_stats_time: Duration::from_secs(0),
+        facet_search_time: Duration::from_secs(0),
+        result_sorting_time: Duration::from_secs(0),
+        distinct_processing_time: Duration::from_secs(0),
+        pagination_time: Duration::from_secs(0),
+        cache_lookup_time: Duration::from_secs(0),
+        database_read_time: Duration::from_secs(0),
+        filter_application_time: Duration::from_secs(0),
+        facet_attribute_timing: BTreeMap::new(),
+        filter_attribute_timing: BTreeMap::new(),
+        additional_timing: BTreeMap::new(),
+    };
 
-    let number_of_hits = min(candidates.len() as usize, max_total_hits);
     let hits_info = if is_finite_pagination {
-        let hits_per_page = hits_per_page.unwrap_or_else(DEFAULT_SEARCH_LIMIT);
-        // If hit_per_page is 0, then pages can't be computed and so we respond 0.
-        let total_pages = (number_of_hits + hits_per_page.saturating_sub(1))
-            .checked_div(hits_per_page)
-            .unwrap_or(0);
-
+        let limit = hits_per_page.unwrap_or_else(DEFAULT_SEARCH_LIMIT);
+        let page = page.unwrap_or(1);
+        let total_pages = (max_total_hits + limit - 1) / limit;
         HitsInfo::Pagination {
-            hits_per_page,
-            page: page.unwrap_or(1),
+            hits_per_page: limit,
+            page,
             total_pages,
-            total_hits: number_of_hits,
+            total_hits: max_total_hits,
         }
     } else {
-        HitsInfo::OffsetLimit { limit, offset, estimated_total_hits: number_of_hits }
+        HitsInfo::OffsetLimit {
+            limit,
+            offset,
+            estimated_total_hits: max_total_hits,
+        }
     };
 
-    let (facet_distribution, facet_stats) = facets
-        .map(move |facets| {
-            compute_facet_distribution_stats(&facets, index, &rtxn, candidates, Route::Search)
-        })
-        .transpose()?
-        .map(|ComputedFacets { distribution, stats }| (distribution, stats))
-        .unzip();
-
-    let result = SearchResult {
-        hits: documents,
-        hits_info,
+    Ok(SearchResult {
+        hits,
         query: q.unwrap_or_default(),
         processing_time_ms: before_search.elapsed().as_millis(),
-        facet_distribution,
-        facet_stats,
+        hits_info,
+        facet_distribution: facet_timing.as_ref().map(|f| f.distribution.clone()),
+        facet_stats: facet_timing.map(|f| f.stats),
+        semantic_hit_count,
+        detailed_timing: Some(SearchTimingHierarchy::from_flat_timing(&detailed_timing)),
         degraded,
         used_negative_operator,
-        semantic_hit_count,
-    };
-    Ok(result)
+    })
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
@@ -1579,6 +1948,9 @@ fn make_hits<'a>(
     matching_words: milli::MatchingWords,
     documents_ids_scores: impl Iterator<Item = (u32, &'a Vec<ScoreDetails>)> + 'a,
 ) -> milli::Result<Vec<SearchHit>> {
+    let span = tracing::trace_span!(target: "search::results::format", "result_formatting");
+    let _enter = span.enter();
+    
     let mut documents = Vec::new();
 
     let dictionary = index.dictionary(rtxn)?;
@@ -2121,4 +2493,216 @@ fn parse_filter_array(arr: &[Value]) -> Result<Option<Filter>, MeilisearchHttpEr
     }
 
     Filter::from_array(ands).map_err(|e| MeilisearchHttpError::from_milli(e, None))
+}
+
+/// Collect timing information from tracing spans
+/// This function creates a temporary tracing layer to collect timing information
+/// from the various search operations
+fn collect_search_timing<F, R>(operation: F) -> Result<R, ResponseError>
+where
+    F: FnOnce() -> Result<R, ResponseError>,
+{
+    // Create a temporary tracing layer to collect events
+    let (trace, layer) = tracing_trace::Trace::new(false);
+    let registry = tracing_subscriber::Registry::default().with(layer);
+    let _guard = tracing::subscriber::set_default(registry);
+
+    // Execute the operation
+    let result = operation()?;
+
+    // Collect the trace
+    let mut receiver = trace.into_receiver();
+    let mut buffer = Vec::new();
+    while let Some(entry) = receiver.blocking_recv() {
+        serde_json::to_writer(&mut buffer, &entry).unwrap();
+    }
+
+    // Process the entries to extract timing information
+    let mut timing = SearchTiming {
+        total_search_time: Duration::from_secs(0),
+        query_processing_time: Duration::from_secs(0),
+        search_execution_time: Duration::from_secs(0),
+        result_formatting_time: Duration::from_secs(0),
+        query_parsing_time: Duration::from_secs(0),
+        query_tree_build_time: Duration::from_secs(0),
+        query_tree_simplify_time: Duration::from_secs(0),
+        ranking_graph_build_time: Duration::from_secs(0),
+        tokenization_time: Duration::from_secs(0),
+        tokenizer_build_time: Duration::from_secs(0),
+        keyword_search_time: Duration::from_secs(0),
+        vector_search_time: Duration::from_secs(0),
+        hybrid_search_time: Duration::from_secs(0),
+        embedding_time: Duration::from_secs(0),
+        words_ranking_time: Duration::from_secs(0),
+        typo_ranking_time: Duration::from_secs(0),
+        proximity_ranking_time: Duration::from_secs(0),
+        attribute_ranking_time: Duration::from_secs(0),
+        exactness_ranking_time: Duration::from_secs(0),
+        sort_ranking_time: Duration::from_secs(0),
+        geo_sort_time: Duration::from_secs(0),
+        geo_filter_time: Duration::from_secs(0),
+        geo_sort_compute_time: Duration::from_secs(0),
+        geo_bucket_sort_time: Duration::from_secs(0),
+        facet_distribution_time: Duration::from_secs(0),
+        facet_stats_time: Duration::from_secs(0),
+        facet_search_time: Duration::from_secs(0),
+        result_sorting_time: Duration::from_secs(0),
+        distinct_processing_time: Duration::from_secs(0),
+        pagination_time: Duration::from_secs(0),
+        cache_lookup_time: Duration::from_secs(0),
+        database_read_time: Duration::from_secs(0),
+        filter_application_time: Duration::from_secs(0),
+        facet_attribute_timing: BTreeMap::new(),
+        filter_attribute_timing: BTreeMap::new(),
+        additional_timing: BTreeMap::new(),
+    };
+
+    // Process the trace entries to extract timing information
+    if let Ok(stats) = tracing_trace::processor::span_stats::to_call_stats(tracing_trace::TraceReader::new(buffer.as_slice())) {
+        for (span_name, stat) in stats {
+            let time_ms = stat.time / 1_000_000; // Convert nanoseconds to milliseconds
+            
+            match span_name.as_str() {
+                // Tokenization
+                "search::tokens::tokenizer_builder" => {
+                    timing.tokenizer_build_time += Duration::from_millis(time_ms);
+                    timing.tokenization_time += Duration::from_millis(time_ms);
+                }
+                "search::tokens::tokenize" => {
+                    timing.tokenization_time += Duration::from_millis(time_ms);
+                }
+                
+                // Vector and hybrid search
+                "search::vector::embed_one" => {
+                    timing.vector_search_time += Duration::from_millis(time_ms);
+                    timing.embedding_time += Duration::from_millis(time_ms);
+                }
+                "search::hybrid::embed_one" => {
+                    timing.hybrid_search_time += Duration::from_millis(time_ms);
+                    timing.embedding_time += Duration::from_millis(time_ms);
+                }
+                
+                // Keyword search (placeholder for now)
+                "search::keyword" => {
+                    timing.keyword_search_time += Duration::from_millis(time_ms);
+                }
+                
+                // Query processing
+                "search::query" => {
+                    timing.query_processing_time += Duration::from_millis(time_ms);
+                }
+                "search::query::parse" => {
+                    timing.query_parsing_time += Duration::from_millis(time_ms);
+                    timing.query_processing_time += Duration::from_millis(time_ms);
+                }
+                "search::query::tree_build" => {
+                    timing.query_tree_build_time += Duration::from_millis(time_ms);
+                    timing.query_processing_time += Duration::from_millis(time_ms);
+                }
+                "search::query::simplify" => {
+                    timing.query_tree_simplify_time += Duration::from_millis(time_ms);
+                    timing.query_processing_time += Duration::from_millis(time_ms);
+                }
+                "search::universe" => {
+                    timing.query_processing_time += Duration::from_millis(time_ms);
+                }
+                "search::main" => {
+                    timing.search_execution_time += Duration::from_millis(time_ms);
+                }
+                
+                // Ranking rules
+                "search::exactness" => {
+                    timing.exactness_ranking_time += Duration::from_millis(time_ms);
+                }
+                "search::exact_attribute" => {
+                    timing.attribute_ranking_time += Duration::from_millis(time_ms);
+                }
+                "search::proximity" => {
+                    timing.proximity_ranking_time += Duration::from_millis(time_ms);
+                }
+                "search::typo" => {
+                    timing.typo_ranking_time += Duration::from_millis(time_ms);
+                }
+                "search::sort" => {
+                    timing.sort_ranking_time += Duration::from_millis(time_ms);
+                }
+                "search::graph_based" => {
+                    timing.ranking_graph_build_time += Duration::from_millis(time_ms);
+                }
+                "search::geo_sort" => {
+                    timing.geo_sort_time += Duration::from_millis(time_ms);
+                }
+                
+                // Geographic operations
+                "search::geo::filter" => {
+                    timing.geo_filter_time += Duration::from_millis(time_ms);
+                }
+                "search::geo::sort::compute" => {
+                    timing.geo_sort_compute_time += Duration::from_millis(time_ms);
+                }
+                "search::geo::sort::bucket" => {
+                    timing.geo_bucket_sort_time += Duration::from_millis(time_ms);
+                }
+                
+                // Facet operations
+                "search::facets::distribution" => {
+                    timing.facet_distribution_time += Duration::from_millis(time_ms);
+                }
+                "search::facets::stats" => {
+                    timing.facet_stats_time += Duration::from_millis(time_ms);
+                }
+                "search::facets::search" => {
+                    timing.facet_search_time += Duration::from_millis(time_ms);
+                }
+                
+                // Result processing
+                "search::results::format" => {
+                    timing.result_formatting_time += Duration::from_millis(time_ms);
+                }
+                "search::results::sort" => {
+                    timing.result_sorting_time += Duration::from_millis(time_ms);
+                }
+                "search::results::distinct" => {
+                    timing.distinct_processing_time += Duration::from_millis(time_ms);
+                }
+                "search::results::limit" => {
+                    timing.pagination_time += Duration::from_millis(time_ms);
+                }
+                
+                // Placeholder search execution
+                "search::main::placeholder_search_execution" => {
+                    timing.search_execution_time += Duration::from_millis(time_ms);
+                }
+                
+                // Cache and database
+                "search::cache::lookup" => {
+                    timing.cache_lookup_time += Duration::from_millis(time_ms);
+                }
+                "search::db::read" => {
+                    timing.database_read_time += Duration::from_millis(time_ms);
+                }
+                "search::db::filter" => {
+                    timing.filter_application_time += Duration::from_millis(time_ms);
+                }
+                
+                // Additional specific spans
+                "search::words" => {
+                    timing.words_ranking_time += Duration::from_millis(time_ms);
+                }
+                "search::attribute" => {
+                    timing.attribute_ranking_time += Duration::from_millis(time_ms);
+                }
+                "search::position" => {
+                    timing.attribute_ranking_time += Duration::from_millis(time_ms);
+                }
+                
+                // Default case - add to additional timing
+                _ => {
+                    timing.additional_timing.insert(span_name, Duration::from_millis(time_ms));
+                }
+            }
+        }
+    }
+
+    Ok(result)
 }

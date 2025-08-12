@@ -99,6 +99,9 @@ impl<'a> SearchForFacetValues<'a> {
             .into());
         };
 
+        let span = tracing::trace_span!(target: "search::facets::search", "facet_search_execution");
+        let _enter = span.enter();
+        
         let fields_ids_map = index.fields_ids_map(rtxn)?;
         let Some(fid) = fields_ids_map.id(&self.facet) else {
             return Ok(Vec::new());
@@ -260,7 +263,7 @@ impl<'a> SearchForFacetValues<'a> {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, PartialEq, utoipa::ToSchema)]
 pub struct FacetValueHit {
     /// The original facet value
     pub value: String,
